@@ -1,4 +1,4 @@
-# Autech - Suite de Teoría de la Computación
+# Autech - Simulador movil de Teoría de la Computación
 
 **Autech** es una aplicación educativa integral diseñada para experimentar con conceptos fundamentales de la Teoría de la Computación. Combina la potencia de **Python** para el procesamiento algorítmico y **Flutter** para una interfaz de usuario moderna.
 
