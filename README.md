@@ -29,5 +29,5 @@ pip install fastapi uvicorn matplotlib networkx flet
 
 # Ejecutar el servidor
 python api_server.py
-
-Proyecto desarrollado para el apoyo a los estudiantes de ToC - Instituto Politécnico Nacional (IPN) para nuestra titulación.
+```
+# Proyecto desarrollado para el apoyo a los estudiantes de ToC - Instituto Politécnico Nacional (IPN) para nuestra titulación.
