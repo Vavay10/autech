@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'login_screen.dart';
+import 'register_screen.dart';
+
 import '../theme.dart';
 
 class AuthScreen extends StatelessWidget {
@@ -9,63 +11,69 @@ class AuthScreen extends StatelessWidget {
 
     return Scaffold(
       backgroundColor: isDark ? AutechColors.darkBg : AutechColors.lightBg,
-      body: SingleChildScrollView( // Para evitar errores de espacio en pantallas pequeñas
-        padding: const EdgeInsets.symmetric(horizontal: 40.0, vertical: 60),
+      body: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 40.0),
         child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Align(alignment: Alignment.centerLeft, child: IconButton(icon: Icon(Icons.arrow_back, color: isDark ? Colors.white : Colors.black), onPressed: () {})),
-            const SizedBox(height: 20),
-            Text("Ingresa tus datos", style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: isDark ? Colors.white : Colors.black)),
-            const SizedBox(height: 40),
             // Logo AUTECH
             Container(
-              padding: EdgeInsets.all(15),
-              decoration: BoxDecoration(shape: BoxShape.circle, border: Border.all(color: AutechColors.primaryCyan, width: 3)),
-              child: Icon(Icons.file_upload_outlined, size: 70, color: AutechColors.primaryCyan),
+              padding: const EdgeInsets.all(20),
+              decoration: BoxDecoration(
+                shape: BoxShape.circle, 
+                border: Border.all(color: AutechColors.primaryCyan, width: 3)
+              ),
+              child: const Icon(Icons.file_upload_outlined, size: 80, color: AutechColors.primaryCyan),
             ),
-            const SizedBox(height: 20),
-            Text("AUTECH", style: TextStyle(fontSize: 30, fontWeight: FontWeight.bold, color: AutechColors.primaryCyan)),
-            Text("Tu app auxiliar para Teoría de\nla computación.", textAlign: TextAlign.center, style: TextStyle(color: Colors.grey)),
-            const SizedBox(height: 40),
+            const SizedBox(height: 30),
+            Text(
+              "AUTECH",
+              style: TextStyle(
+                fontSize: 35, 
+                fontWeight: FontWeight.bold, 
+                color: isDark ? Colors.white : Colors.black,
+                letterSpacing: 2,
+              ),
+            ),
+            const Text(
+              "Tu app auxiliar para\nTeoría de la computación.",
+              textAlign: TextAlign.center,
+              style: TextStyle(color: Colors.grey, fontSize: 16),
+            ),
+            const SizedBox(height: 60),
             
-            // Botón Iniciar Sesión (Navega al formulario)
-            _buildButton("INICIAR SESIÓN", AutechColors.primaryCyan, Colors.white, () {
-              Navigator.push(context, MaterialPageRoute(builder: (context) => LoginScreen()));
-            }),
-            const SizedBox(height: 12),
-            _buildButton("REGISTRARSE", Colors.white, AutechColors.primaryCyan, () {}, isOutlined: true),
-            const SizedBox(height: 12),
-            _buildSocialButton("INICIAR SESIÓN CON GOOGLE", "assets/google_logo.png", isDark),
-            const SizedBox(height: 12),
-            _buildSocialButton("INICIAR SESIÓN CON FACEBOOK", "assets/fb_logo.png", isDark),
+            // Botón Iniciar Sesión
+            ElevatedButton(
+              onPressed: () {
+                Navigator.push(context, MaterialPageRoute(builder: (context) => LoginScreen()));
+              }, 
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AutechColors.primaryCyan,
+                minimumSize: const Size(double.infinity, 50),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
+              ),
+              child: const Text("INICIAR SESIÓN", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+            ),
+            const SizedBox(height: 15),
+            
+            // Botón Registrarse
+// Busca el botón de Registrarse en auth_screen.dart y añade la navegación:
+OutlinedButton(
+  onPressed: () {
+    Navigator.push(
+      context, 
+      MaterialPageRoute(builder: (context) => RegisterScreen())
+    );
+  },
+              style: OutlinedButton.styleFrom(
+                side: const BorderSide(color: AutechColors.primaryCyan, width: 2),
+                minimumSize: const Size(double.infinity, 50),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
+              ),
+              child: const Text("REGISTRARSE", style: TextStyle(color: AutechColors.primaryCyan, fontWeight: FontWeight.bold)),
+            ),
           ],
         ),
-      ),
-    );
-  }
-
-  Widget _buildButton(String text, Color bg, Color textCol, VoidCallback tap, {bool isOutlined = false}) {
-    return ElevatedButton(
-      onPressed: tap,
-      style: ElevatedButton.styleFrom(
-        backgroundColor: isOutlined ? Colors.transparent : bg,
-        side: isOutlined ? BorderSide(color: AutechColors.primaryCyan, width: 2) : null,
-        minimumSize: Size(double.infinity, 50),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
-      ),
-      child: Text(text, style: TextStyle(color: isOutlined ? AutechColors.primaryCyan : textCol, fontWeight: FontWeight.bold)),
-    );
-  }
-
-  Widget _buildSocialButton(String text, String asset, bool isDark) {
-    return OutlinedButton.icon(
-      onPressed: () {},
-      icon: Icon(Icons.account_circle, size: 24), // Reemplazar con Image.asset cuando tengas los logos
-      label: Text(text, style: TextStyle(color: isDark ? Colors.white : Colors.black, fontSize: 12)),
-      style: OutlinedButton.styleFrom(
-        minimumSize: Size(double.infinity, 50),
-        side: BorderSide(color: Colors.grey.shade400),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
       ),
     );
   }
