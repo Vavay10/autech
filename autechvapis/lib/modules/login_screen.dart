@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../theme.dart';
 import '../main.dart';
+import '../layout/main_layout.dart';
 import 'forgot_password_screen.dart';
 
 class LoginScreen extends StatefulWidget {
@@ -40,14 +41,23 @@ class _LoginScreenState extends State<LoginScreen> {
             const SizedBox(height: 25),
             
             ElevatedButton(
-              onPressed: () => Navigator.pushReplacement(context, MaterialPageRoute(builder: (context) => MainContainer())),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AutechColors.primaryCyan,
-                minimumSize: const Size(double.infinity, 55),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
-              ),
-              child: const Text("INICIAR", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-            ),
+  onPressed: () {
+    // Navega al Layout de los 5 módulos reemplazando la vista actual
+    Navigator.pushReplacement(
+      context, 
+      MaterialPageRoute(builder: (context) => MainLayout()),
+    );
+  },
+  style: ElevatedButton.styleFrom(
+    backgroundColor: AutechColors.primaryCyan,
+    minimumSize: const Size(double.infinity, 55),
+    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
+  ),
+  child: const Text(
+    "INICIAR", 
+    style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16),
+  ),
+),
             const SizedBox(height: 15),
             TextButton(
               onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (context) => ForgotPasswordScreen())),
