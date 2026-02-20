@@ -2,14 +2,14 @@ import 'package:flutter/material.dart';
 import 'modules/pda_screen.dart';
 import 'modules/regex_screen.dart';
 import 'modules/turing_screen.dart';
+import 'modules/splash_screen.dart'; // Importa la nueva pantalla
 
 void main() => runApp(MaterialApp(
       debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        useMaterial3: true,
-        colorSchemeSeed: Colors.blue,
-      ),
-      home: MainContainer(),
+      themeMode: ThemeMode.dark, // Cambia a ThemeMode.light para probar la otra versión
+      darkTheme: ThemeData.dark(),
+      theme: ThemeData.light(),
+      home: SplashScreen(),
     ));
 
 class MainContainer extends StatefulWidget {
