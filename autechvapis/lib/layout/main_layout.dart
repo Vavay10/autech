@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../modules/learning_path_screen.dart';
 import '../theme.dart';
+import '../modules/simulator_screen.dart';
 
 class MainLayout extends StatefulWidget {
   @override
@@ -10,14 +11,13 @@ class MainLayout extends StatefulWidget {
 class _MainLayoutState extends State<MainLayout> {
   // El índice 2 corresponde al Módulo de Aprendizaje (icono central)
   int _selectedIndex = 2; 
-
-  final List<Widget> _pages = [
-    const Center(child: Text("Módulo 1: Inicio")),
-    const Center(child: Text("Módulo 2: Simulador Clásico")),
-    LearningPathScreen(), // Tu nueva vista de camino de aprendizaje
-    const Center(child: Text("Módulo 4: Estadísticas")),
-    const Center(child: Text("Módulo 5: Configuración")),
-  ];
+final List<Widget> _pages = [
+  const Center(child: Text("Inicio")),
+  SimulatorScreen(), // <--- El simulador ahora está en la posición 1 (segundo icono)
+  LearningPathScreen(), // Aprendizaje en el centro
+  const Center(child: Text("Estadísticas")),
+  const Center(child: Text("Perfil")),
+];
 
   @override
   Widget build(BuildContext context) {
