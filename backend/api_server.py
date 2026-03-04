@@ -2,6 +2,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import base64
+from fastapi.middleware.cors import CORSMiddleware
 
 # Importamos las funciones lógicas de tus archivos
 from AP import PDA, convert_pda_to_cfg
