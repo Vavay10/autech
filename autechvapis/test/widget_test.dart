@@ -1,30 +1,31 @@
-// This is a basic Flutter widget test.
-//
-// To perform an interaction with a widget in your test, use the WidgetTester
-// utility in the flutter_test package. For example, you can send tap and scroll
-// gestures. You can also use WidgetTester to find child widgets in the widget
-// tree, read text, and verify that the values of widget properties are correct.
-
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-
 import 'package:autechvapis/main.dart';
+import 'package:autechvapis/modules/splash_screen.dart';
 
 void main() {
-  testWidgets('Counter increments smoke test', (WidgetTester tester) async {
-    // Build our app and trigger a frame.
-    await tester.pumpWidget(const MyApp());
+  testWidgets('Prueba de carga inicial de AUTECH', (WidgetTester tester) async {
+    // 1. Cargamos la aplicación tal cual la tienes en el main.dart
+    // Nota: Como en tu main usas MaterialApp directamente, aquí lo replicamos
+    await tester.pumpWidget(MaterialApp(
+      home: SplashScreen(),
+    ));
 
-    // Verify that our counter starts at 0.
-    expect(find.text('0'), findsOneWidget);
-    expect(find.text('1'), findsNothing);
+    // 2. Verificamos que el SplashScreen esté presente
+    // (Asegúrate de que en tu SplashScreen haya algún texto o widget identificable)
+    expect(find.byType(SplashScreen), findsOneWidget);
 
-    // Tap the '+' icon and trigger a frame.
-    await tester.tap(find.byIcon(Icons.add));
-    await tester.pump();
+    // 3. Si quieres probar el contenedor principal directamente:
+    await tester.pumpWidget(MaterialApp(
+      home: MainContainer(),
+    ));
 
-    // Verify that our counter has incremented.
-    expect(find.text('0'), findsNothing);
-    expect(find.text('1'), findsOneWidget);
+    // Verificamos que aparezca el título de tu AppBar móvil
+    expect(find.text("Suite de Teoría de la Computación"), findsOneWidget);
+
+    // Verificamos que los íconos del NavigationRail (o menú) estén ahí
+    expect(find.byIcon(Icons.hub_outlined), findsOneWidget);
+    expect(find.byIcon(Icons.layers_outlined), findsOneWidget);
+    expect(find.byIcon(Icons.memory_outlined), findsOneWidget);
   });
 }
