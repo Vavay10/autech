@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'dart:async';
 import 'auth_screen.dart'; // importar login
+import 'login_screen.dart'; // importar login
 import '../main.dart'; // Asegúrate de que apunte a donde está MainContainer
 
 class SplashScreen extends StatefulWidget {
@@ -20,7 +21,21 @@ Timer(Duration(seconds: 3), () {
     MaterialPageRoute(builder: (context) => AuthScreen()),
   );
 });
-  }
+// animación despues del splash
+// En lib/modules/splash_screen.dart
+Future.delayed(const Duration(seconds: 3), () {
+  if (!mounted) return;
+  Navigator.pushReplacement(
+    context,
+    PageRouteBuilder(
+      pageBuilder: (context, animation, secondaryAnimation) => LoginScreen(),
+      transitionsBuilder: (context, animation, secondaryAnimation, child) {
+        return FadeTransition(opacity: animation, child: child);
+      },
+      transitionDuration: const Duration(milliseconds: 800),
+    ),
+  );
+});}
 
   @override
   Widget build(BuildContext context) {

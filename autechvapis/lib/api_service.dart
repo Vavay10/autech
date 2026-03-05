@@ -2,7 +2,8 @@ import 'package:http/http.dart' as http;
 import 'dart:convert';
 
 class ApiService {
-  final String baseUrl = "http://10.0.2.2:8000";
+ // final String baseUrl = "http://10.0.2.2:8000"; //para simular en el ceeeel simulado
+ final String baseUrl = "http://192.168.0.180:8000"; // Tu IP local real para usar el apk
 
   Future<Map<String, dynamic>> postPDA(Map<String, String> data) async {
     final response = await http.post(
