@@ -1,6 +1,5 @@
 // lib/modules/learning_path_screen.dart
 import 'package:flutter/material.dart';
-import '../../theme.dart';
 import 'unit_nodes_screen.dart';
 
 class LearningPathScreen extends StatefulWidget {

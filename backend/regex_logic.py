@@ -391,6 +391,155 @@ def regex_to_min_dfa_json(regex: str) -> dict:
     return automaton_to_json(min_states, min_trans, min_init, min_acc, alphabet)
 
 
+# ─── Automaton → Regular Expression (State Elimination) ──────────────────────
+
+def _wrap(r: str) -> str:
+    """Wrap a regex string in parentheses only if needed (non-trivial)."""
+    if not r or r == 'ε' or len(r) == 1:
+        return r
+    if r.startswith('(') and r.endswith(')'):
+        # Check if the outer parens are matching
+        depth = 0
+        for i, c in enumerate(r):
+            if c == '(': depth += 1
+            elif c == ')': depth -= 1
+            if depth == 0 and i < len(r) - 1:
+                return f'({r})'
+        return r
+    return f'({r})'
+
+
+def _concat(r1: Optional[str], r2: Optional[str]) -> Optional[str]:
+    if r1 is None or r2 is None:
+        return None
+    if r1 == 'ε': return r2
+    if r2 == 'ε': return r1
+    return _wrap(r1) + _wrap(r2)
+
+
+def _union(r1: Optional[str], r2: Optional[str]) -> Optional[str]:
+    if r1 is None: return r2
+    if r2 is None: return r1
+    if r1 == r2: return r1
+    return f'({r1}|{r2})'
+
+
+def _star(r: Optional[str]) -> str:
+    if r is None or r == 'ε':
+        return 'ε'
+    if len(r) == 1:
+        return f'{r}*'
+    return f'({r})*'
+
+
+def automaton_to_regex(states: list, transitions: dict, initial: str,
+                       accepting: set, alphabet: set = None) -> str:
+    """
+    Convert a DFA/NFA to a regular expression using the state elimination
+    (Generalized NFA) algorithm.
+
+    Returns a regex string.
+    """
+    if not states:
+        raise ValueError("El autómata no tiene estados.")
+    if not initial:
+        raise ValueError("El autómata no tiene estado inicial.")
+    if not accepting:
+        raise ValueError("El autómata no tiene estados de aceptación.")
+
+    # Filter unreachable states
+    reachable = {initial}
+    queue = deque([initial])
+    while queue:
+        s = queue.popleft()
+        for sym, dest in transitions.get(s, {}).items():
+            if isinstance(dest, str) and dest not in reachable:
+                reachable.add(dest)
+                queue.append(dest)
+            elif isinstance(dest, set):
+                for d in dest:
+                    if d not in reachable:
+                        reachable.add(d)
+                        queue.append(d)
+
+    states = [s for s in states if s in reachable]
+    accepting = {s for s in accepting if s in reachable}
+
+    # Special case: single accepting = initial state (accepts ε at least)
+    QS = '__qs__'   # new unified start
+    QA = '__qa__'   # new unified accept
+
+    # Build GNFA as dict[from_state][to_state] = regex | None
+    all_states = [QS] + list(states) + [QA]
+    gnfa: Dict[str, Dict[str, Optional[str]]] = {s: {t: None for t in all_states} for s in all_states}
+
+    # QS → initial with ε
+    gnfa[QS][initial] = 'ε'
+
+    # accepting states → QA with ε
+    for acc in accepting:
+        existing = gnfa[acc][QA]
+        gnfa[acc][QA] = _union(existing, 'ε')
+
+    # Original transitions
+    # Edge labels may be comma-separated (e.g. 'a,b' means transitions on both a and b)
+    for frm, trans in transitions.items():
+        if frm not in reachable:
+            continue
+        if isinstance(trans, dict):
+            for sym, dest in trans.items():
+                # Split comma-separated labels into individual symbols
+                raw_symbols = [s.strip() for s in sym.split(',') if s.strip()]
+                dests = [dest] if isinstance(dest, str) else list(dest)
+                for raw_sym in raw_symbols:
+                    if raw_sym == 'ε' or raw_sym == '':
+                        sym_label = 'ε'
+                    else:
+                        sym_label = raw_sym
+                    for to in dests:
+                        if to not in reachable:
+                            continue
+                        gnfa[frm][to] = _union(gnfa[frm][to], sym_label)
+
+    # Eliminate states one by one (all except QS and QA)
+    to_eliminate = list(states)
+
+    for elim in to_eliminate:
+        loop = gnfa[elim][elim]       # self-loop
+        star_loop = _star(loop)       # (loop)*
+
+        # Remaining states (not elim)
+        remaining = [s for s in all_states if s != elim]
+
+        for qi in remaining:
+            for qj in remaining:
+                r_in = gnfa[qi][elim]   # qi → elim
+                r_out = gnfa[elim][qj]  # elim → qj
+                if r_in is None or r_out is None:
+                    continue
+
+                # New path: r_in · star_loop · r_out
+                mid = _concat(star_loop if star_loop != 'ε' else None, r_out)
+                new_path = _concat(r_in, mid if mid else r_out)
+
+                gnfa[qi][qj] = _union(gnfa[qi][qj], new_path)
+
+        # Remove elim from GNFA
+        all_states.remove(elim)
+        del gnfa[elim]
+        for s in all_states:
+            if elim in gnfa[s]:
+                del gnfa[s][elim]
+
+    result = gnfa[QS][QA]
+    if result is None:
+        return '∅'  # empty language
+
+    # Clean up ε in result
+    result = result.replace('(ε|ε)', 'ε')
+    return result
+
+
 # ─── Language Operations ──────────────────────────────────────────────────────
 
 def _dfa_accepts(transitions: dict, accepting: set, initial: str, word: str) -> bool:
@@ -410,16 +559,11 @@ def _generate_words(alphabet: set, max_len: int) -> List[str]:
 
 def operation_kleene(states, transitions, initial, accepting, alphabet):
     """Returns a sample JSON for Kleene closure: regex* of the accepted language."""
-    # Build regex from DFA and apply *
-    # Simpler: we represent the new DFA by adding ε to accepting and loop
-    # For display purposes, just return the augmented DFA JSON
-    # We'll use the closure: new accept initial + self-loops
     new_states = list(states) + ["KLEENE_INIT"]
     new_transitions = dict(transitions)
     new_transitions["KLEENE_INIT"] = transitions.get(initial, {})
     new_accepting = set(accepting) | {"KLEENE_INIT"}
     for s in accepting:
-        # Connect accepting states back
         new_transitions[s] = dict(transitions.get(s, {}))
     return automaton_to_json(new_states, new_transitions, "KLEENE_INIT", new_accepting, alphabet)
 
@@ -438,7 +582,6 @@ def operation_union(s1, t1, i1, a1, s2, t2, i2, a2, alphabet):
             if np_ and nq:
                 product_transitions[(p, q)][sym] = (np_, nq)
 
-    # Rename states
     rename = {s: f"U{i}" for i, s in enumerate(product_states)}
     states_json = [{"id": rename[s], "isInitial": s == product_initial, "isAccepting": s in product_accepting}
                    for s in product_states]
@@ -479,3 +622,24 @@ def operation_intersection(s1, t1, i1, a1, s2, t2, i2, a2, alphabet):
             edges_json.append({"from": rename[s], "to": rename[to], "label": ",".join(sorted(syms))})
 
     return {"states": states_json, "edges": edges_json, "alphabet": sorted(list(alphabet))}
+
+
+# ─── Quick test ───────────────────────────────────────────────────────────────
+
+if __name__ == '__main__':
+    # Test automaton_to_regex with a simple DFA for a*b
+    states = ['M0', 'M1', 'M2']
+    transitions = {
+        'M0': {'a': 'M0', 'b': 'M1'},
+        'M1': {'a': 'M2', 'b': 'M2'},
+        'M2': {'a': 'M2', 'b': 'M2'},
+    }
+    initial = 'M0'
+    accepting = {'M1'}
+    alphabet = {'a', 'b'}
+    regex = automaton_to_regex(states, transitions, initial, accepting, alphabet)
+    print(f"a*b → regex: {regex}")
+
+    # Test regex_to_min_dfa_json
+    result = regex_to_min_dfa_json('a*b')
+    print(f"a*b → DFA states: {[s['id'] for s in result['states']]}")

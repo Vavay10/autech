@@ -74,6 +74,9 @@ class _TuringScreenState extends State<TuringScreen> with SingleTickerProviderSt
     final states = (data['states'] as List?)?.map((s) => StateNode.fromJson(s as Map<String, dynamic>)).toList() ?? [];
     final edges = (data['edges'] as List?)?.map((e) => TransitionEdge.fromJson(e as Map<String, dynamic>)).toList() ?? [];
     setState(() { _gStates = states; _gEdges = edges; });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _canvasKey.currentState?.fitToScreen();
+    });
   }
 
   void _buildGraphLocally() {
@@ -103,6 +106,9 @@ class _TuringScreenState extends State<TuringScreen> with SingleTickerProviderSt
     }).toList();
 
     setState(() { _gStates = stateNodes; _gEdges = edges; });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _canvasKey.currentState?.fitToScreen();
+    });
   }
 
   // ── Simulation ─────────────────────────────────────────────────────────────
@@ -282,7 +288,7 @@ class _TuringScreenState extends State<TuringScreen> with SingleTickerProviderSt
             Padding(padding: const EdgeInsets.only(top: 8), child: _ErrorCard(_error)),
           const SizedBox(height: 12),
           FilledButton.icon(
-            onPressed: _loading ? null : () { _buildGraph(); _startSim(); _tab.animateTo(1); },
+            onPressed: _loading ? null : () async { await _buildGraph(); await _startSim(); _tab.animateTo(1); },
             icon: _loading
                 ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
                 : const Icon(Icons.play_circle, size: 16),
@@ -306,6 +312,19 @@ class _TuringScreenState extends State<TuringScreen> with SingleTickerProviderSt
       ]));
     }
 
+    return LayoutBuilder(builder: (context, constraints) {
+      final isLandscape = constraints.maxWidth > constraints.maxHeight && constraints.maxWidth > 500;
+      final content = _buildSimContent();
+      if (isLandscape) {
+        return Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Expanded(flex: 3, child: content),
+        ]);
+      }
+      return content;
+    });
+  }
+
+  Widget _buildSimContent() {
     final cur = _steps[_step];
     final tape = (cur['tape'] as List?)?.cast<String>() ?? [];
     final headPos = cur['headPos'] as int? ?? 0;
@@ -436,50 +455,51 @@ class _TuringScreenState extends State<TuringScreen> with SingleTickerProviderSt
   // ── Tab 3: Graph ──────────────────────────────────────────────────────────
 
   Widget _buildGraphTab() {
-    return Column(
-      children: [
-        // Legend
-        Padding(
-          padding: const EdgeInsets.fromLTRB(12, 10, 12, 6),
-          child: SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            child: Row(children: [
-              _LegendDot(color: Colors.blue.shade100, label: 'Inicial'),
-              const SizedBox(width: 12),
-              _LegendDot(color: Colors.orange.shade100, label: 'Aceptación'),
-              const SizedBox(width: 12),
-              _LegendDot(color: Colors.yellow.shade100, label: 'Actual'),
-              const SizedBox(width: 12),
-              _LegendDot(color: Colors.blueGrey.shade50, label: 'Normal'),
-            ]),
-          ),
+    return LayoutBuilder(builder: (context, constraints) {
+      final legend = Padding(
+        padding: const EdgeInsets.fromLTRB(12, 10, 12, 6),
+        child: SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: Row(children: [
+            _LegendDot(color: Colors.blue.shade100, label: 'Inicial'),
+            const SizedBox(width: 12),
+            _LegendDot(color: Colors.orange.shade100, label: 'Aceptación'),
+            const SizedBox(width: 12),
+            _LegendDot(color: Colors.yellow.shade100, label: 'Actual'),
+            const SizedBox(width: 12),
+            _LegendDot(color: Colors.blueGrey.shade50, label: 'Normal'),
+            const SizedBox(width: 12),
+            const Text('Arrastra estados para moverlos',
+              style: TextStyle(fontSize: 11, color: AppColors.textHint, fontStyle: FontStyle.italic)),
+          ]),
         ),
-        // Graph canvas
-        Expanded(
-          child: Container(
-            margin: const EdgeInsets.fromLTRB(8, 0, 8, 8),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: AppColors.border),
-            ),
-            child: _gStates.isEmpty
-                ? Center(child: Column(mainAxisSize: MainAxisSize.min, children: [
-                    Icon(Icons.schema_outlined, size: 40, color: Colors.grey.shade300),
-                    const SizedBox(height: 8),
-                    const Text('El grafo aparece al iniciar la simulación', style: TextStyle(color: AppColors.textHint)),
-                  ]))
-                : AutomatonCanvas(
-                    key: _canvasKey,
-                    states: _gStates,
-                    edges: _gEdges,
-                    editable: false,
-                    animatedState: _highlightState,
-                  ),
-          ),
+      );
+      final canvas = Container(
+        margin: const EdgeInsets.fromLTRB(8, 0, 8, 8),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: AppColors.border),
         ),
-      ],
-    );
+        child: _gStates.isEmpty
+            ? Center(child: Column(mainAxisSize: MainAxisSize.min, children: [
+                Icon(Icons.schema_outlined, size: 40, color: Colors.grey.shade300),
+                const SizedBox(height: 8),
+                const Text('El grafo aparece al iniciar la simulación',
+                    style: TextStyle(color: AppColors.textHint)),
+              ]))
+            : AutomatonCanvas(
+                key: _canvasKey,
+                states: _gStates,
+                edges: _gEdges,
+                editable: false,
+                draggable: true,
+                animatedState: _highlightState,
+                onPositionsChanged: (_) {},
+              ),
+      );
+      return Column(children: [legend, Expanded(child: canvas)]);
+    });
   }
 
   void _onExampleSelected(String key) {

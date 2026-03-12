@@ -26,6 +26,7 @@ class PDA:
     def parse(self, states_str: str, input_alpha_str: str, stack_alpha_str: str,
               start_state_str: str, start_symbol_str: str, accept_states_str: str,
               transitions_str: str):
+        """Parse PDA definition from string fields."""
         self.clear()
         errors = []
 
@@ -96,6 +97,32 @@ class PDA:
             raise ValueError("\n".join(errors))
 
         self.transitions = processed_transitions
+
+    def parse_from_ui(self, states_str: str, input_alpha_str: str, stack_alpha_str: str,
+                      start_state_str: str, start_symbol_str: str, accept_states_str: str,
+                      transitions_str: str):
+        """Alias for parse() — compatibility with legacy API server code."""
+        return self.parse(
+            states_str, input_alpha_str, stack_alpha_str,
+            start_state_str, start_symbol_str, accept_states_str,
+            transitions_str,
+        )
+
+    def parse_from_dict(self, data: dict):
+        """
+        Parse PDA from a dictionary (as received from the Flutter API).
+        Expected keys: states, inputAlphabet, stackAlphabet, startState,
+                       startSymbol, acceptStates, transitions
+        """
+        return self.parse(
+            data.get('states', ''),
+            data.get('inputAlphabet', ''),
+            data.get('stackAlphabet', ''),
+            data.get('startState', ''),
+            data.get('startSymbol', ''),
+            data.get('acceptStates', ''),
+            data.get('transitions', ''),
+        )
 
     def _parse_stack_push(self, stack_push_str: str, line_num: int, errors: List[str]) -> Optional[Tuple[str, ...]]:
         if stack_push_str == EPSILON:
@@ -177,6 +204,7 @@ class PDASimulator:
         if step >= self.max_steps:
             trace.append(f"⚠️ Límite de {self.max_steps} pasos alcanzado.")
 
+        trace.append("❌ Cadena RECHAZADA")
         return {'accepted': False, 'trace': trace, 'steps': step}
 
     def _explore(self, state, char, input_after, stack, queue, visited, trace, step):

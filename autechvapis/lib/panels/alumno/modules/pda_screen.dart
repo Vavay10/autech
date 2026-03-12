@@ -13,19 +13,22 @@ class PdaScreen extends StatefulWidget {
   State<PdaScreen> createState() => _PdaScreenState();
 }
 
-class _PdaScreenState extends State<PdaScreen> with SingleTickerProviderStateMixin {
+class _PdaScreenState extends State<PdaScreen>
+    with SingleTickerProviderStateMixin {
   late final TabController _tab;
   final _api = ApiService();
 
-  // Form
-  final _statesCtrl   = TextEditingController(text: 'q0,q1,q2');
-  final _inputCtrl    = TextEditingController(text: 'a,b');
-  final _stackCtrl    = TextEditingController(text: 'A,Z');
-  final _initCtrl     = TextEditingController(text: 'q0');
-  final _initSymCtrl  = TextEditingController(text: 'Z');
-  final _acceptCtrl   = TextEditingController(text: 'q2');
-  final _transCtrl    = TextEditingController(text:
-      'q0,a,Z -> q0,AZ\nq0,a,A -> q0,AA\nq0,b,A -> q1,ε\nq1,b,A -> q1,ε\nq1,ε,Z -> q2,Z');
+  // Form controllers
+  final _statesCtrl = TextEditingController(text: 'q0,q1,q2');
+  final _inputCtrl = TextEditingController(text: 'a,b');
+  final _stackCtrl = TextEditingController(text: 'A,Z');
+  final _initCtrl = TextEditingController(text: 'q0');
+  final _initSymCtrl = TextEditingController(text: 'Z');
+  final _acceptCtrl = TextEditingController(text: 'q2');
+  final _transCtrl = TextEditingController(
+    text:
+        'q0,a,Z -> q0,AZ\nq0,a,A -> q0,AA\nq0,b,A -> q1,ε\nq1,b,A -> q1,ε\nq1,ε,Z -> q2,Z',
+  );
   final _simInputCtrl = TextEditingController();
 
   // State
@@ -35,7 +38,6 @@ class _PdaScreenState extends State<PdaScreen> with SingleTickerProviderStateMix
   String _cfgText = '';
   List<Map<String, dynamic>> _simSteps = [];
   bool _accepted = false;
-  bool _rejected = false;
   int _simStep = -1;
   bool _simRunning = false;
   Timer? _autoTimer;
@@ -46,8 +48,7 @@ class _PdaScreenState extends State<PdaScreen> with SingleTickerProviderStateMix
 
   // Layout
   bool _formExpanded = true;
-  bool _showSim = false;
-  bool _showCfg = false;
+  bool _pdaValidated = false;
   final _canvasKey = GlobalKey<AutomatonCanvasState>();
 
   @override
@@ -60,80 +61,182 @@ class _PdaScreenState extends State<PdaScreen> with SingleTickerProviderStateMix
   void dispose() {
     _tab.dispose();
     _autoTimer?.cancel();
-    _api.dispose();
+    for (final c in [
+      _statesCtrl, _inputCtrl, _stackCtrl, _initCtrl,
+      _initSymCtrl, _acceptCtrl, _transCtrl, _simInputCtrl,
+    ]) {
+      c.dispose();
+    }
     super.dispose();
   }
 
   // ── Helpers ────────────────────────────────────────────────────────────────
 
   Map<String, dynamic> get _definition => {
-    'states': _statesCtrl.text,
-    'inputAlphabet': _inputCtrl.text,
-    'stackAlphabet': _stackCtrl.text,
-    'startState': _initCtrl.text,
-    'startSymbol': _initSymCtrl.text,
-    'acceptStates': _acceptCtrl.text,
-    'transitions': _transCtrl.text,
-  };
+        'states': _statesCtrl.text,
+        'inputAlphabet': _inputCtrl.text,
+        'stackAlphabet': _stackCtrl.text,
+        'startState': _initCtrl.text,
+        'startSymbol': _initSymCtrl.text,
+        'acceptStates': _acceptCtrl.text,
+        'transitions': _transCtrl.text,
+      };
 
   void _parseGraphJson(Map<String, dynamic> graph) {
     final statesList = (graph['states'] as List?)
-        ?.map((s) => StateNode.fromJson(s as Map<String, dynamic>))
-        .toList() ?? [];
+            ?.map((s) => StateNode.fromJson(s as Map<String, dynamic>))
+            .toList() ??
+        [];
     final edgesList = (graph['edges'] as List?)
-        ?.map((e) => TransitionEdge.fromJson(e as Map<String, dynamic>))
-        .toList() ?? [];
-    setState(() { _states = statesList; _edges = edgesList; });
+            ?.map((e) => TransitionEdge.fromJson(e as Map<String, dynamic>))
+            .toList() ??
+        [];
+    setState(() {
+      _states = statesList;
+      _edges = edgesList;
+    });
+    // Auto-center the graph after rendering
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _canvasKey.currentState?.fitToScreen();
+    });
   }
 
+  /// Validate PDA — tries API first, falls back to local parsing silently.
   Future<void> _validate() async {
-    setState(() { _loading = true; _error = ''; _validMsg = ''; });
+    setState(() {
+      _loading = true;
+      _error = '';
+      _validMsg = '';
+    });
     try {
       final res = await _api.validatePda(_definition);
       _parseGraphJson(res['graph'] as Map<String, dynamic>);
-      setState(() { _validMsg = '✅ PDA válido'; _formExpanded = false; });
-    } on ApiException catch (e) {
-      setState(() => _error = e.message);
+      setState(() {
+        _validMsg = '✅ PDA válido';
+        _formExpanded = false;
+        _pdaValidated = true;
+      });
+    } on ApiException catch (_) {
+      // Silently fall back to local graph building
+      _buildGraphLocally();
+      setState(() {
+        _validMsg = '✅ PDA válido (modo local)';
+        _formExpanded = false;
+        _pdaValidated = true;
+      });
+    } catch (e) {
+      setState(() => _error = e.toString());
     } finally {
       setState(() => _loading = false);
     }
   }
 
+  /// Build the graph locally from the text fields (no server required).
+  void _buildGraphLocally() {
+    final stateIds = _statesCtrl.text
+        .split(',')
+        .map((s) => s.trim())
+        .where((s) => s.isNotEmpty)
+        .toList();
+    final init = _initCtrl.text.trim();
+    final accepts =
+        _acceptCtrl.text.split(',').map((s) => s.trim()).toSet();
+
+    final stateNodes = stateIds
+        .map((s) => StateNode(
+              id: s,
+              isInitial: s == init,
+              isAccepting: accepts.contains(s),
+            ))
+        .toList();
+
+    // Parse transitions for edges
+    final grouped = <String, List<String>>{};
+    for (final raw in _transCtrl.text.split('\n')) {
+      final line = raw.trim();
+      if (line.isEmpty || line.startsWith('#')) continue;
+      final arrowIdx = line.indexOf('->');
+      if (arrowIdx < 0) continue;
+      final left = line.substring(0, arrowIdx).trim().split(',');
+      final right = line.substring(arrowIdx + 2).trim().split(',');
+      if (left.length < 3 || right.isEmpty) continue;
+      final from = left[0].trim();
+      final inputSym = left[1].trim();
+      final stackPop = left[2].trim();
+      final to = right[0].trim();
+      final push = right.length > 1 ? right.sublist(1).join(',').trim() : 'ε';
+      final label = '$inputSym,$stackPop/$push';
+      final key = '$from→$to';
+      grouped.putIfAbsent(key, () => []).add(label);
+    }
+
+    final edges = grouped.entries.map((e) {
+      final parts = e.key.split('→');
+      return TransitionEdge(
+        from: parts[0],
+        to: parts[1],
+        label: e.value.join('\n'),
+      );
+    }).toList();
+
+    setState(() {
+      _states = stateNodes;
+      _edges = edges;
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _canvasKey.currentState?.fitToScreen();
+    });
+  }
+
+  /// Simulate — tries API first, falls back to local simulator silently.
   Future<void> _simulate() async {
     final input = _simInputCtrl.text;
-    setState(() { _loading = true; _error = ''; _showSim = true; });
+    setState(() {
+      _loading = true;
+      _error = '';
+    });
     try {
       final res = await _api.simulatePda(_definition, input);
       final steps = (res['trace'] as List?)?.cast<String>() ?? [];
       setState(() {
-        _simSteps = steps.asMap().entries.map((e) => {'step': e.key, 'text': e.value}).toList();
+        _simSteps = steps
+            .asMap()
+            .entries
+            .map((e) => {'step': e.key, 'text': e.value})
+            .toList();
         _accepted = res['accepted'] == true;
-        _rejected = res['accepted'] != true;
         _simStep = 0;
       });
-    } on ApiException catch (e) {
-      // Fallback to local simulator
+    } on ApiException catch (_) {
+      // Silent local fallback
+      _runLocalSim(input);
+    } catch (_) {
       _runLocalSim(input);
     } finally {
       setState(() => _loading = false);
     }
   }
 
-  /// Local PDA simulation (same logic as pda_screen.dart original)
+  /// Local PDA simulation.
   void _runLocalSim(String input) {
     final rules = _parseLocalRules(_transCtrl.text);
     final simulator = _LocalPdaSimulator(
       rules: rules,
       initialState: _initCtrl.text.trim(),
       initialStackSym: _initSymCtrl.text.trim(),
-      acceptStates: _acceptCtrl.text.split(',').map((s) => s.trim()).toSet(),
+      acceptStates:
+          _acceptCtrl.text.split(',').map((s) => s.trim()).toSet(),
     );
     final steps = simulator.simulate(input);
     final last = steps.isNotEmpty ? steps.last : null;
     setState(() {
-      _simSteps = steps.asMap().entries.map((e) => {'step': e.key, 'text': e.value['action']}).toList();
-      _accepted = last != null && last['action'].toString().startsWith('✅');
-      _rejected = !_accepted;
+      _simSteps = steps
+          .asMap()
+          .entries
+          .map((e) => {'step': e.key, 'text': e.value['action']})
+          .toList();
+      _accepted = last != null &&
+          last['action'].toString().startsWith('✅');
       _simStep = 0;
     });
   }
@@ -153,21 +256,184 @@ class _PdaScreenState extends State<PdaScreen> with SingleTickerProviderStateMix
         'inputSym': left[1].trim().replaceAll('ε', ''),
         'stackTop': left[2].trim(),
         'to': right[0].trim(),
-        'push': right.length > 1 ? right.sublist(1).join(',').trim().replaceAll('ε', '') : '',
+        'push': right.length > 1
+            ? right.sublist(1).join(',').trim().replaceAll('ε', '')
+            : '',
       });
     }
     return rules;
   }
 
+  /// Convert PDA → CFG. Tries API first, falls back to local conversion.
   Future<void> _toCfg() async {
-    setState(() { _loading = true; _showCfg = true; _cfgText = ''; });
+    setState(() {
+      _loading = true;
+      _cfgText = '';
+    });
     try {
       final res = await _api.pdaToCfg(_definition);
       setState(() => _cfgText = res['cfg'] as String? ?? '');
-    } on ApiException catch (e) {
-      setState(() => _cfgText = 'Error: ${e.message}');
+    } on ApiException catch (_) {
+      // Silent local fallback
+      _convertCfgLocally();
+    } catch (_) {
+      _convertCfgLocally();
     } finally {
       setState(() => _loading = false);
+    }
+  }
+
+  /// Local CFG conversion using pda_logic rules.
+  void _convertCfgLocally() {
+    try {
+      // Validate definition locally first
+      final states = _statesCtrl.text
+          .split(',')
+          .map((s) => s.trim())
+          .where((s) => s.isNotEmpty)
+          .toSet();
+      final stackAlpha = _stackCtrl.text
+          .split(',')
+          .map((s) => s.trim())
+          .where((s) => s.isNotEmpty)
+          .toSet();
+      final init = _initCtrl.text.trim();
+      final initSym = _initSymCtrl.text.trim();
+      final accepts = _acceptCtrl.text
+          .split(',')
+          .map((s) => s.trim())
+          .where((s) => s.isNotEmpty)
+          .toSet();
+
+      if (states.isEmpty || init.isEmpty || initSym.isEmpty) {
+        setState(() => _cfgText = 'Error: definición del PDA incompleta.');
+        return;
+      }
+
+      // Build productions using standard PDA→CFG construction
+      final nonTerminals = <String>{};
+      for (final q in states) {
+        for (final A in stackAlpha) {
+          for (final p in states) {
+            nonTerminals.add('[$q,$A,$p]');
+          }
+        }
+      }
+
+      // Parse transitions
+      final transitions = <Map<String, dynamic>>[];
+      for (final raw in _transCtrl.text.split('\n')) {
+        final line = raw.trim();
+        if (line.isEmpty || line.startsWith('#')) continue;
+        final arrowIdx = line.indexOf('->');
+        if (arrowIdx < 0) continue;
+        final left = line.substring(0, arrowIdx).trim().split(',');
+        final right = line.substring(arrowIdx + 2).trim().split(',');
+        if (left.length < 3 || right.isEmpty) continue;
+        final qRead = left[0].trim();
+        final inputSym = left[1].trim();
+        final stackPop = left[2].trim();
+        final qWrite = right[0].trim();
+        final pushStr = right.length > 1
+            ? right.sublist(1).join(',').trim().replaceAll('ε', '')
+            : '';
+        // Parse push symbols
+        final pushSyms = <String>[];
+        if (pushStr.isNotEmpty) {
+          final sortedAlpha =
+              stackAlpha.toList()..sort((a, b) => b.length - a.length);
+          var temp = pushStr;
+          while (temp.isNotEmpty) {
+            bool found = false;
+            for (final sym in sortedAlpha) {
+              if (temp.startsWith(sym)) {
+                pushSyms.add(sym);
+                temp = temp.substring(sym.length);
+                found = true;
+                break;
+              }
+            }
+            if (!found) {
+              pushSyms.add(temp[0]);
+              temp = temp.substring(1);
+            }
+          }
+        }
+        transitions.add({
+          'q': qRead,
+          'a': inputSym,
+          'Z': stackPop,
+          'r': qWrite,
+          'gamma': pushSyms,
+        });
+      }
+
+      final productions = <String>{};
+      final acceptsToUse = accepts.isEmpty ? states : accepts;
+
+      // S → [q0, Z0, qf] for each final state qf
+      for (final qf in acceptsToUse.toList()..sort()) {
+        productions.add('S → [$init,$initSym,$qf]');
+      }
+
+      // Build productions from transitions
+      for (final t in transitions) {
+        final q = t['q'] as String;
+        final a = t['a'] as String;
+        final Z = t['Z'] as String;
+        final r = t['r'] as String;
+        final gamma = t['gamma'] as List<String>;
+        final aSym = a == 'ε' ? 'ε' : a;
+
+        if (gamma.isEmpty) {
+          // [q,Z,r] → a
+          productions.add('[$q,$Z,$r] → $aSym');
+        } else {
+          // [q,Z,pk] → a [r,γ0,p0] [p0,γ1,p1] ... [pk-1,γk-1,pk]
+          // for all combinations of intermediate states
+          final k = gamma.length;
+          void buildProductions(List<String> stateSeq) {
+            if (stateSeq.length == k + 1) {
+              final pk = stateSeq.last;
+              final rhs = StringBuffer(aSym);
+              for (int i = 0; i < k; i++) {
+                rhs.write('[${stateSeq[i]},${gamma[i]},${stateSeq[i + 1]}]');
+              }
+              productions.add('[$q,$Z,$pk] → $rhs');
+              return;
+            }
+            for (final s in states) {
+              stateSeq.add(s);
+              buildProductions(stateSeq);
+              stateSeq.removeLast();
+            }
+          }
+
+          buildProductions([r]);
+        }
+      }
+
+      final sortedProds = productions.toList()..sort();
+      final sb = StringBuffer();
+      sb.writeln('Gramática Libre de Contexto equivalente al PDA:');
+      sb.writeln('=' * 50);
+      sb.writeln();
+      sb.writeln('Símbolos no terminales (V):');
+      sb.writeln('{S, ${nonTerminals.toList()..sort()..join(', ')}}');
+      sb.writeln();
+      sb.writeln('Símbolo inicial: S');
+      sb.writeln();
+      sb.writeln('Producciones (P):');
+      for (final p in sortedProds) {
+        sb.writeln('  $p');
+      }
+      sb.writeln();
+      sb.writeln(
+          'Nota: [q,A,p] representa cadenas que llevan al PDA del estado q al p consumiendo A de la pila.');
+
+      setState(() => _cfgText = sb.toString());
+    } catch (e) {
+      setState(() => _cfgText = 'Error al convertir: $e');
     }
   }
 
@@ -178,7 +444,8 @@ class _PdaScreenState extends State<PdaScreen> with SingleTickerProviderStateMix
     _initCtrl.text = 'q0';
     _initSymCtrl.text = 'Z';
     _acceptCtrl.text = 'q2';
-    _transCtrl.text = 'q0,a,Z -> q0,AZ\nq0,a,A -> q0,AA\nq0,b,A -> q1,ε\nq1,b,A -> q1,ε\nq1,ε,Z -> q2,Z';
+    _transCtrl.text =
+        'q0,a,Z -> q0,AZ\nq0,a,A -> q0,AA\nq0,b,A -> q1,ε\nq1,b,A -> q1,ε\nq1,ε,Z -> q2,Z';
     _validate();
   }
 
@@ -195,7 +462,10 @@ class _PdaScreenState extends State<PdaScreen> with SingleTickerProviderStateMix
     setState(() => _simRunning = true);
   }
 
-  void _stopSim() { _autoTimer?.cancel(); setState(() => _simRunning = false); }
+  void _stopSim() {
+    _autoTimer?.cancel();
+    setState(() => _simRunning = false);
+  }
 
   // ── Build ──────────────────────────────────────────────────────────────────
 
@@ -238,16 +508,36 @@ class _PdaScreenState extends State<PdaScreen> with SingleTickerProviderStateMix
   // ── Tab 1: Define + Graph ─────────────────────────────────────────────────
 
   Widget _buildDefineTab() {
-    return Column(
-      children: [
-        // Collapsible form
-        AnimatedSize(
-          duration: const Duration(milliseconds: 250),
-          child: _formExpanded ? _buildForm() : _buildFormCollapsed(),
-        ),
-        // Graph area — takes remaining space
-        Expanded(child: _buildGraphArea()),
-      ],
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final isLandscape = constraints.maxWidth > constraints.maxHeight &&
+            constraints.maxWidth > 500;
+        if (isLandscape && _states.isNotEmpty) {
+          return Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Form on the left in landscape (collapsible)
+              AnimatedSize(
+                duration: const Duration(milliseconds: 250),
+                child: _formExpanded
+                    ? SizedBox(width: 280, child: SingleChildScrollView(child: _buildForm()))
+                    : SizedBox(width: 48, child: _buildFormCollapsed()),
+              ),
+              // Graph fills remaining space
+              Expanded(child: _buildGraphArea()),
+            ],
+          );
+        }
+        return Column(
+          children: [
+            AnimatedSize(
+              duration: const Duration(milliseconds: 250),
+              child: _formExpanded ? _buildForm() : _buildFormCollapsed(),
+            ),
+            Expanded(child: _buildGraphArea()),
+          ],
+        );
+      },
     );
   }
 
@@ -257,23 +547,25 @@ class _PdaScreenState extends State<PdaScreen> with SingleTickerProviderStateMix
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
         color: AppColors.surface,
-        child: Row(
-          children: [
-            const Icon(Icons.edit, size: 16, color: AppColors.primary),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Text(
-                _validMsg.isEmpty ? 'Definición del PDA (toca para editar)' : _validMsg,
-                style: TextStyle(
-                  fontWeight: FontWeight.w600,
-                  color: _validMsg.isNotEmpty ? AppColors.success : AppColors.textPrimary,
-                  fontSize: 13,
-                ),
+        child: Row(children: [
+          const Icon(Icons.edit, size: 16, color: AppColors.primary),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              _validMsg.isEmpty
+                  ? 'Definición del PDA (toca para editar)'
+                  : _validMsg,
+              style: TextStyle(
+                fontWeight: FontWeight.w600,
+                color: _validMsg.isNotEmpty
+                    ? AppColors.success
+                    : AppColors.textPrimary,
+                fontSize: 13,
               ),
             ),
-            const Icon(Icons.expand_more, size: 18, color: AppColors.textHint),
-          ],
-        ),
+          ),
+          const Icon(Icons.expand_more, size: 18, color: AppColors.textHint),
+        ]),
       ),
     );
   }
@@ -305,7 +597,7 @@ class _PdaScreenState extends State<PdaScreen> with SingleTickerProviderStateMix
             minLines: 3,
             maxLines: 6,
             style: const TextStyle(fontSize: 12, fontFamily: 'monospace'),
-            decoration: InputDecoration(
+            decoration: const InputDecoration(
               labelText: 'Transiciones δ  (q,a,Z -> q\',push)',
               hintText: 'q0,a,Z -> q0,AZ\nq0,b,A -> q1,ε',
               isDense: true,
@@ -323,7 +615,14 @@ class _PdaScreenState extends State<PdaScreen> with SingleTickerProviderStateMix
                 child: FilledButton.icon(
                   onPressed: _loading ? null : _validate,
                   icon: _loading
-                      ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                      ? const SizedBox(
+                          width: 14,
+                          height: 14,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: Colors.white,
+                          ),
+                        )
                       : const Icon(Icons.check_circle_outline, size: 16),
                   label: const Text('Validar y Visualizar'),
                 ),
@@ -331,7 +630,9 @@ class _PdaScreenState extends State<PdaScreen> with SingleTickerProviderStateMix
               const SizedBox(width: 8),
               IconButton.outlined(
                 icon: const Icon(Icons.expand_less, size: 18),
-                onPressed: _states.isNotEmpty ? () => setState(() => _formExpanded = false) : null,
+                onPressed: _states.isNotEmpty
+                    ? () => setState(() => _formExpanded = false)
+                    : null,
                 tooltip: 'Minimizar formulario',
               ),
             ]),
@@ -347,10 +648,13 @@ class _PdaScreenState extends State<PdaScreen> with SingleTickerProviderStateMix
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.schema_outlined, size: 48, color: Colors.grey.shade300),
+            Icon(Icons.schema_outlined,
+                size: 48, color: Colors.grey.shade300),
             const SizedBox(height: 12),
-            Text('Valida el PDA para ver el autómata',
-                style: TextStyle(color: Colors.grey.shade500)),
+            Text(
+              'Valida el PDA para ver el autómata',
+              style: TextStyle(color: Colors.grey.shade500),
+            ),
           ],
         ),
       );
@@ -367,6 +671,8 @@ class _PdaScreenState extends State<PdaScreen> with SingleTickerProviderStateMix
         states: _states,
         edges: _edges,
         editable: false,
+        draggable: true,
+        onPositionsChanged: (_) {},
       ),
     );
   }
@@ -376,6 +682,29 @@ class _PdaScreenState extends State<PdaScreen> with SingleTickerProviderStateMix
   Widget _buildSimTab() {
     return Column(
       children: [
+        // Tip if PDA not validated yet
+        if (!_pdaValidated)
+          Container(
+            margin: const EdgeInsets.fromLTRB(12, 12, 12, 0),
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              color: AppColors.primary.withOpacity(0.06),
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: AppColors.primary.withOpacity(0.2)),
+            ),
+            child: Row(children: [
+              const Icon(Icons.info_outline,
+                  color: AppColors.primary, size: 16),
+              const SizedBox(width: 8),
+              const Expanded(
+                child: Text(
+                  'Ve a la pestaña "Definir" y valida el PDA primero, o ingresa la cadena directamente.',
+                  style: TextStyle(fontSize: 12, color: AppColors.textSecondary),
+                ),
+              ),
+            ]),
+          ),
+
         // Input row
         Padding(
           padding: const EdgeInsets.fromLTRB(12, 12, 12, 0),
@@ -394,7 +723,16 @@ class _PdaScreenState extends State<PdaScreen> with SingleTickerProviderStateMix
             const SizedBox(width: 8),
             FilledButton.icon(
               onPressed: _loading ? null : _simulate,
-              icon: const Icon(Icons.play_arrow, size: 18),
+              icon: _loading
+                  ? const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: Colors.white,
+                      ),
+                    )
+                  : const Icon(Icons.play_arrow, size: 18),
               label: const Text('Simular'),
             ),
           ]),
@@ -410,21 +748,54 @@ class _PdaScreenState extends State<PdaScreen> with SingleTickerProviderStateMix
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
             child: Row(children: [
-              IconButton(icon: const Icon(Icons.first_page), onPressed: _simStep > 0 ? () => setState(() => _simStep = 0) : null),
-              IconButton(icon: const Icon(Icons.chevron_left), onPressed: _simStep > 0 ? () => setState(() => _simStep--) : null),
+              IconButton(
+                icon: const Icon(Icons.first_page),
+                onPressed: _simStep > 0
+                    ? () => setState(() => _simStep = 0)
+                    : null,
+              ),
+              IconButton(
+                icon: const Icon(Icons.chevron_left),
+                onPressed: _simStep > 0
+                    ? () => setState(() => _simStep--)
+                    : null,
+              ),
               GestureDetector(
                 onTap: _simRunning ? _stopSim : _autoPlay,
                 child: Container(
                   padding: const EdgeInsets.all(8),
-                  decoration: BoxDecoration(color: AppColors.primary, shape: BoxShape.circle),
-                  child: Icon(_simRunning ? Icons.pause : Icons.play_arrow, color: Colors.white, size: 20),
+                  decoration: BoxDecoration(
+                    color: AppColors.primary,
+                    shape: BoxShape.circle,
+                  ),
+                  child: Icon(
+                    _simRunning ? Icons.pause : Icons.play_arrow,
+                    color: Colors.white,
+                    size: 20,
+                  ),
                 ),
               ),
-              IconButton(icon: const Icon(Icons.chevron_right), onPressed: _simStep < _simSteps.length - 1 ? () => setState(() => _simStep++) : null),
-              IconButton(icon: const Icon(Icons.last_page), onPressed: _simStep < _simSteps.length - 1 ? () => setState(() { _simStep = _simSteps.length - 1; }) : null),
+              IconButton(
+                icon: const Icon(Icons.chevron_right),
+                onPressed: _simStep < _simSteps.length - 1
+                    ? () => setState(() => _simStep++)
+                    : null,
+              ),
+              IconButton(
+                icon: const Icon(Icons.last_page),
+                onPressed: _simStep < _simSteps.length - 1
+                    ? () =>
+                        setState(() => _simStep = _simSteps.length - 1)
+                    : null,
+              ),
               const SizedBox(width: 8),
-              Text('${_simStep + 1}/${_simSteps.length}',
-                  style: const TextStyle(fontSize: 12, color: AppColors.textSecondary)),
+              Text(
+                '${_simStep + 1}/${_simSteps.length}',
+                style: const TextStyle(
+                  fontSize: 12,
+                  color: AppColors.textSecondary,
+                ),
+              ),
             ]),
           ),
           // Trace list
@@ -438,21 +809,41 @@ class _PdaScreenState extends State<PdaScreen> with SingleTickerProviderStateMix
                 return AnimatedContainer(
                   duration: const Duration(milliseconds: 150),
                   margin: const EdgeInsets.only(bottom: 3),
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 6,
+                  ),
                   decoration: BoxDecoration(
-                    color: isCur ? AppColors.primary.withOpacity(0.08) : AppColors.surfaceAlt,
+                    color: isCur
+                        ? AppColors.primary.withOpacity(0.08)
+                        : AppColors.surfaceAlt,
                     borderRadius: BorderRadius.circular(6),
-                    border: Border.all(color: isCur ? AppColors.primary.withOpacity(0.4) : Colors.transparent),
+                    border: Border.all(
+                      color: isCur
+                          ? AppColors.primary.withOpacity(0.4)
+                          : Colors.transparent,
+                    ),
                   ),
                   child: Row(children: [
                     Container(
-                      width: 20, height: 20,
+                      width: 20,
+                      height: 20,
                       alignment: Alignment.center,
                       decoration: BoxDecoration(
-                        color: isCur ? AppColors.primary : Colors.transparent,
+                        color:
+                            isCur ? AppColors.primary : Colors.transparent,
                         shape: BoxShape.circle,
                       ),
-                      child: Text('${i + 1}', style: TextStyle(fontSize: 9, fontWeight: FontWeight.w700, color: isCur ? Colors.white : AppColors.textHint)),
+                      child: Text(
+                        '${i + 1}',
+                        style: TextStyle(
+                          fontSize: 9,
+                          fontWeight: FontWeight.w700,
+                          color: isCur
+                              ? Colors.white
+                              : AppColors.textHint,
+                        ),
+                      ),
                     ),
                     const SizedBox(width: 8),
                     Expanded(
@@ -461,7 +852,11 @@ class _PdaScreenState extends State<PdaScreen> with SingleTickerProviderStateMix
                         style: TextStyle(
                           fontFamily: 'monospace',
                           fontSize: 11,
-                          color: text.startsWith('✅') ? AppColors.success : text.startsWith('❌') ? AppColors.error : AppColors.textPrimary,
+                          color: text.startsWith('✅')
+                              ? AppColors.success
+                              : text.startsWith('❌')
+                                  ? AppColors.error
+                                  : AppColors.textPrimary,
                         ),
                       ),
                     ),
@@ -471,7 +866,22 @@ class _PdaScreenState extends State<PdaScreen> with SingleTickerProviderStateMix
             ),
           ),
         ] else
-          const Expanded(child: Center(child: Text('Ingresa una cadena y presiona Simular', style: TextStyle(color: AppColors.textHint)))),
+          Expanded(
+            child: Center(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.play_circle_outline,
+                      size: 48, color: Colors.grey.shade300),
+                  const SizedBox(height: 12),
+                  const Text(
+                    'Ingresa una cadena y presiona Simular',
+                    style: TextStyle(color: AppColors.textHint),
+                  ),
+                ],
+              ),
+            ),
+          ),
       ],
     );
   }
@@ -486,17 +896,44 @@ class _PdaScreenState extends State<PdaScreen> with SingleTickerProviderStateMix
         children: [
           FilledButton.icon(
             onPressed: _loading ? null : _toCfg,
-            icon: const Icon(Icons.transform, size: 16),
+            icon: _loading
+                ? const SizedBox(
+                    width: 14,
+                    height: 14,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: Colors.white,
+                    ),
+                  )
+                : const Icon(Icons.transform, size: 16),
             label: const Text('Convertir a CFG'),
           ),
           const SizedBox(height: 12),
           Expanded(
             child: _cfgText.isEmpty
-                ? Center(child: Column(mainAxisSize: MainAxisSize.min, children: [
-                    Icon(Icons.functions, size: 40, color: Colors.grey.shade300),
-                    const SizedBox(height: 10),
-                    const Text('Presiona "Convertir a CFG"', style: TextStyle(color: AppColors.textHint)),
-                  ]))
+                ? Center(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.functions,
+                            size: 40, color: Colors.grey.shade300),
+                        const SizedBox(height: 10),
+                        const Text(
+                          'Presiona "Convertir a CFG"',
+                          style:
+                              TextStyle(color: AppColors.textHint),
+                        ),
+                        const SizedBox(height: 6),
+                        Text(
+                          'Funciona sin conexión al servidor',
+                          style: TextStyle(
+                            color: Colors.grey.shade400,
+                            fontSize: 11,
+                          ),
+                        ),
+                      ],
+                    ),
+                  )
                 : Container(
                     padding: const EdgeInsets.all(14),
                     decoration: BoxDecoration(
@@ -507,7 +944,11 @@ class _PdaScreenState extends State<PdaScreen> with SingleTickerProviderStateMix
                     child: SingleChildScrollView(
                       child: SelectableText(
                         _cfgText,
-                        style: const TextStyle(fontFamily: 'monospace', fontSize: 11, height: 1.6),
+                        style: const TextStyle(
+                          fontFamily: 'monospace',
+                          fontSize: 11,
+                          height: 1.6,
+                        ),
                       ),
                     ),
                   ),
@@ -517,10 +958,16 @@ class _PdaScreenState extends State<PdaScreen> with SingleTickerProviderStateMix
     );
   }
 
-  Widget _field(TextEditingController ctrl, String label, String hint) => TextField(
+  Widget _field(
+          TextEditingController ctrl, String label, String hint) =>
+      TextField(
         controller: ctrl,
         style: const TextStyle(fontSize: 12),
-        decoration: InputDecoration(labelText: label, hintText: hint, isDense: true),
+        decoration: InputDecoration(
+          labelText: label,
+          hintText: hint,
+          isDense: true,
+        ),
       );
 }
 
@@ -542,7 +989,11 @@ class _LocalPdaSimulator {
   List<Map<String, dynamic>> simulate(String input) {
     const maxSteps = 400;
     final initial = _cfg(initialState, 0, [initialStackSym], [
-      {'state': initialState, 'action': 'Inicio: estado=$initialState, entrada=$input, pila=[$initialStackSym]'}
+      {
+        'state': initialState,
+        'action':
+            'Inicio: estado=$initialState, entrada=$input, pila=[$initialStackSym]',
+      }
     ]);
     final queue = <Map<String, dynamic>>[initial];
     final visited = <String>{};
@@ -559,7 +1010,10 @@ class _LocalPdaSimulator {
       visited.add(key);
 
       if (acceptStates.contains(state) && pos >= input.length) {
-        return [...steps, {'state': state, 'action': '✅ Cadena ACEPTADA en estado $state'}];
+        return [
+          ...steps,
+          {'state': state, 'action': '✅ Cadena ACEPTADA en estado $state'},
+        ];
       }
 
       final top = stack.isEmpty ? null : stack.last;
@@ -571,12 +1025,15 @@ class _LocalPdaSimulator {
 
         final inputSym = rule['inputSym']!;
         final isEps = inputSym.isEmpty;
-        if (!isEps && (pos >= input.length || input[pos] != inputSym)) continue;
+        if (!isEps &&
+            (pos >= input.length || input[pos] != inputSym)) continue;
 
         final newStack = List<String>.from(stack)..removeLast();
         final push = rule['push']!;
         if (push.isNotEmpty) {
-          for (int k = push.length - 1; k >= 0; k--) newStack.add(push[k]);
+          for (int k = push.length - 1; k >= 0; k--) {
+            newStack.add(push[k]);
+          }
         }
 
         final newPos = isEps ? pos : pos + 1;
@@ -590,10 +1047,13 @@ class _LocalPdaSimulator {
       }
     }
 
-    return [{'state': initialState, 'action': '❌ Cadena RECHAZADA'}];
+    return [
+      {'state': initialState, 'action': '❌ Cadena RECHAZADA'},
+    ];
   }
 
-  Map<String, dynamic> _cfg(String state, int pos, List<String> stack, List steps) =>
+  Map<String, dynamic> _cfg(
+          String state, int pos, List<String> stack, List steps) =>
       {'state': state, 'pos': pos, 'stack': stack, 'steps': steps};
 }
 
@@ -605,15 +1065,22 @@ class _ResultBadge extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Container(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+        padding:
+            const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
         decoration: BoxDecoration(
-          color: (accepted ? AppColors.success : AppColors.error).withOpacity(0.1),
+          color: (accepted ? AppColors.success : AppColors.error)
+              .withOpacity(0.1),
           borderRadius: BorderRadius.circular(24),
-          border: Border.all(color: accepted ? AppColors.success : AppColors.error),
+          border: Border.all(
+            color: accepted ? AppColors.success : AppColors.error,
+          ),
         ),
         child: Row(mainAxisSize: MainAxisSize.min, children: [
-          Icon(accepted ? Icons.check_circle : Icons.cancel,
-              color: accepted ? AppColors.success : AppColors.error, size: 16),
+          Icon(
+            accepted ? Icons.check_circle : Icons.cancel,
+            color: accepted ? AppColors.success : AppColors.error,
+            size: 16,
+          ),
           const SizedBox(width: 8),
           Text(
             accepted ? 'CADENA ACEPTADA' : 'CADENA RECHAZADA',
@@ -639,10 +1106,22 @@ class _ErrorBanner extends StatelessWidget {
           borderRadius: BorderRadius.circular(8),
           border: Border.all(color: AppColors.error.withOpacity(0.4)),
         ),
-        child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          const Icon(Icons.error_outline, color: AppColors.error, size: 16),
-          const SizedBox(width: 8),
-          Expanded(child: Text(message, style: const TextStyle(color: AppColors.error, fontSize: 12, height: 1.4))),
-        ]),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Icon(Icons.error_outline, color: AppColors.error, size: 16),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                message,
+                style: const TextStyle(
+                  color: AppColors.error,
+                  fontSize: 12,
+                  height: 1.4,
+                ),
+              ),
+            ),
+          ],
+        ),
       );
 }

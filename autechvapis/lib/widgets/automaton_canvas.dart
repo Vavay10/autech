@@ -52,6 +52,8 @@ class AutomatonCanvas extends StatefulWidget {
   final List<TransitionEdge> edges;
   final Map<String, Offset>? initialPositions;
   final bool editable;
+  /// Allow dragging states even when [editable] is false.
+  final bool draggable;
   final String? animatedState;
   final Set<String>? animatedEdgeKeys;
   final void Function(StateNode added, Offset pos)? onStateAdded;
@@ -67,6 +69,7 @@ class AutomatonCanvas extends StatefulWidget {
     required this.edges,
     this.initialPositions,
     this.editable = true,
+    this.draggable = true,
     this.animatedState,
     this.animatedEdgeKeys,
     this.onStateAdded,
@@ -144,6 +147,10 @@ class AutomatonCanvasState extends State<AutomatonCanvas> {
       final s = _tfCtrl.value.getMaxScaleOnAxis();
       if ((s - _scale).abs() > 0.001) setState(() => _scale = s);
     });
+    // Auto-fit after first frame so states are always visible
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && widget.states.isNotEmpty) fitToScreen();
+    });
   }
 
   @override
@@ -152,12 +159,19 @@ class AutomatonCanvasState extends State<AutomatonCanvas> {
   @override
   void didUpdateWidget(AutomatonCanvas old) {
     super.didUpdateWidget(old);
+    final wasEmpty = old.states.isEmpty;
     for (final s in widget.states) {
       if (!_pos.containsKey(s.id)) {
         _pos[s.id] = _autoPlace();
       }
     }
     _pos.removeWhere((k, _) => !widget.states.any((s) => s.id == k));
+    // Auto-fit when states are loaded from outside (e.g. API response)
+    if (wasEmpty && widget.states.isNotEmpty) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) fitToScreen();
+      });
+    }
   }
 
   void _syncPositions() {
@@ -495,8 +509,8 @@ class AutomatonCanvasState extends State<AutomatonCanvas> {
         // HitTestBehavior.opaque: this widget fully absorbs the pointer event.
         behavior: HitTestBehavior.opaque,
         onPointerDown: (_) {
-          // Only drag in select mode (not while drawing a transition)
-          if (widget.editable && _mode == CanvasMode.select) {
+          // Allow drag when draggable (independent of editable)
+          if ((widget.draggable || widget.editable) && _mode == CanvasMode.select) {
             setState(() => _draggingStateId = s.id);
           }
         },
