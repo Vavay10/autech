@@ -1,188 +1,348 @@
-# AutomatApp.py
-import flet as ft
-import traceback  # Para imprimir errores detallados
+"""
+FastAPI Backend for Automata Simulator
+Run with: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+"""
+from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+from typing import List, Optional, Dict, Any
 
-# --- 1. Importar las funciones que crean la UI de cada herramienta ---
-try:
-    from expre import create_automata_view
-    from AP import create_ap_view
-    from turing3 import create_turing_view
+from pda_logic import PDA, PDASimulator, convert_pda_to_cfg
+from regex_logic import (
+    regex_to_min_dfa_json,
+    parse_regex, build_nfa, nfa_to_dfa, minimize_dfa,
+    automaton_to_json, operation_union, operation_intersection,
+)
+from turing_logic import parse_transitions, simulate_turing, build_graph_json
 
-    print("INFO: Funciones de UI importadas correctamente.")
-except ImportError as e:
-    print(f"ERROR CRÍTICO al importar vistas: {e}")
-    print("--- Asegúrate que los archivos .py estén en la misma carpeta que AutomatApp.py ---")
+app = FastAPI(title="Automata Simulator API", version="1.0.0")
 
-
-    def create_error_view(tool_name, error_msg):
-        return ft.Column([
-            ft.Text(f"Error al importar {tool_name}", color=ft.Colors.RED, size=18),
-            ft.Text(f"{error_msg}", selectable=True)
-        ], expand=True, horizontal_alignment=ft.CrossAxisAlignment.CENTER)
-
-
-    def create_automata_view(page):
-        return create_error_view("Autómatas", e)
-
-
-    def create_ap_view(page):
-        return create_error_view("AP", e)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
-    def create_turing_view(page):
-        return create_error_view("Turing", e)
+# ═══════════════════════════════════════════════════════════
+# PDA ENDPOINTS
+# ═══════════════════════════════════════════════════════════
+
+class PDADefinition(BaseModel):
+    states: str
+    inputAlphabet: str
+    stackAlphabet: str
+    startState: str
+    startSymbol: str
+    acceptStates: str
+    transitions: str
 
 
-# --- Función Principal de la Aplicación ---
-def main(page: ft.Page):
-    page.title = "Suite de Teoría de la Computación"
-    page.theme_mode = ft.ThemeMode.LIGHT
-    page.padding = 0  # El padding se manejará en los contenedores internos
+class PDASimulateRequest(BaseModel):
+    definition: PDADefinition
+    inputString: str
 
-    # --- Área Principal de Contenido ---
-    main_content_column = ft.Column(
-        [ft.ProgressRing()],
-        expand=True,
-        alignment=ft.MainAxisAlignment.START,
-        horizontal_alignment=ft.CrossAxisAlignment.STRETCH
-    )
 
-    # --- Función para Cambiar la Vista Mostrada (sin cambios en su lógica interna) ---
-    def change_view(event_or_index):
-        selected_index = -1
+@app.post("/api/pda/validate")
+def pda_validate(req: PDADefinition):
+    """Validate PDA and return graph JSON for Flutter canvas."""
+    pda = PDA()
+    try:
+        pda.parse(
+            req.states, req.inputAlphabet, req.stackAlphabet,
+            req.startState, req.startSymbol, req.acceptStates,
+            req.transitions,
+        )
+        return {"valid": True, "graph": pda.to_graph_json(), "message": "PDA válido."}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
-        if isinstance(event_or_index, ft.ControlEvent):
-            if event_or_index.control:
-                selected_index = event_or_index.control.selected_index
-            else:
-                return
-        elif isinstance(event_or_index, int):
-            selected_index = event_or_index
+
+@app.post("/api/pda/simulate")
+def pda_simulate(req: PDASimulateRequest):
+    """Simulate PDA on input string."""
+    pda = PDA()
+    try:
+        d = req.definition
+        pda.parse(d.states, d.inputAlphabet, d.stackAlphabet,
+                  d.startState, d.startSymbol, d.acceptStates, d.transitions)
+        sim = PDASimulator(pda)
+        result = sim.simulate(req.inputString)
+        return result
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.post("/api/pda/to_cfg")
+def pda_to_cfg(req: PDADefinition):
+    """Convert PDA to Context-Free Grammar."""
+    pda = PDA()
+    try:
+        pda.parse(
+            req.states, req.inputAlphabet, req.stackAlphabet,
+            req.startState, req.startSymbol, req.acceptStates, req.transitions,
+        )
+        cfg_text = convert_pda_to_cfg(pda)
+        return {"cfg": cfg_text}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+# ═══════════════════════════════════════════════════════════
+# REGEX ENDPOINTS
+# ═══════════════════════════════════════════════════════════
+
+class RegexRequest(BaseModel):
+    regex: str
+
+
+class AutomatonData(BaseModel):
+    states: List[str]
+    transitions: Dict[str, Dict[str, str]]
+    initial: str
+    accepting: List[str]
+    alphabet: List[str]
+
+
+class OperationRequest(BaseModel):
+    automaton1: AutomatonData
+    automaton2: Optional[AutomatonData] = None
+    operation: str  # kleene, positive, union, intersection, difference, reverse, power
+    n: Optional[int] = None  # for power operation
+
+
+@app.post("/api/regex/to_automaton")
+def regex_to_automaton(req: RegexRequest):
+    """Convert regex to minimized DFA, return Flutter-compatible graph JSON."""
+    try:
+        graph = regex_to_min_dfa_json(req.regex)
+        return graph
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error interno: {str(e)}")
+
+
+@app.post("/api/regex/from_automaton")
+def automaton_to_regex(req: AutomatonData):
+    """Convert DFA to regex using state elimination."""
+    try:
+        result = _dfa_to_regex(req.states, req.transitions, req.initial, set(req.accepting))
+        return {"regex": result}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+def _dfa_to_regex(states, transitions, initial, accepting):
+    """Simple state elimination for DFA → regex."""
+    # Add new start and accept states
+    states = list(states)
+    trans = {s: dict(t) for s, t in transitions.items()}
+
+    new_init = "__INIT__"
+    new_accept = "__ACCEPT__"
+    trans[new_init] = {None: initial}  # ε-transition
+
+    for s in accepting:
+        if s not in trans: trans[s] = {}
+        trans[s][None] = new_accept  # ε-transition
+
+    all_states = [new_init] + states + [new_accept]
+
+    # State elimination (simplified)
+    # For now, return a descriptive message
+    if not accepting:
+        return "∅ (lenguaje vacío)"
+    return f"Autómata con {len(states)} estado(s) — use la función de conversión"
+
+
+@app.post("/api/regex/operation")
+def perform_operation(req: OperationRequest):
+    """Perform language operation on automaton(a)."""
+    try:
+        a1 = req.automaton1
+        s1 = a1.states
+        t1 = a1.transitions
+        i1 = a1.initial
+        acc1 = set(a1.accepting)
+        alph = set(a1.alphabet)
+
+        if req.operation == "kleene":
+            result = _kleene(s1, t1, i1, acc1, alph)
+        elif req.operation == "positive":
+            result = _positive(s1, t1, i1, acc1, alph)
+        elif req.operation == "reverse":
+            result = _reverse(s1, t1, i1, acc1, alph)
+        elif req.operation == "complement":
+            result = _complement(s1, t1, i1, acc1, alph)
+        elif req.operation in ("union", "intersection", "difference"):
+            if not req.automaton2:
+                raise HTTPException(status_code=400, detail="Se requiere un segundo autómata")
+            a2 = req.automaton2
+            s2, t2, i2, acc2 = a2.states, a2.transitions, a2.initial, set(a2.accepting)
+            combined_alph = alph | set(a2.alphabet)
+            if req.operation == "union":
+                result = operation_union(s1, t1, i1, acc1, s2, t2, i2, acc2, combined_alph)
+            elif req.operation == "intersection":
+                result = operation_intersection(s1, t1, i1, acc1, s2, t2, i2, acc2, combined_alph)
+            else:  # difference
+                acc2_comp = set(s2) - acc2
+                result = operation_intersection(s1, t1, i1, acc1, s2, t2, i2, acc2_comp, combined_alph)
+        elif req.operation == "power":
+            n = req.n or 1
+            result = _power(s1, t1, i1, acc1, alph, n)
         else:
-            return
+            raise HTTPException(status_code=400, detail=f"Operación desconocida: {req.operation}")
 
-        print(f"INFO: Cargando vista índice: {selected_index}")
-        current_view = None
+        return result
 
-        try:
-            if selected_index == 0:
-                current_view = create_automata_view(page)
-            elif selected_index == 1:
-                current_view = create_ap_view(page)
-            elif selected_index == 2:
-                current_view = create_turing_view(page)
-            else:
-                current_view = ft.Text(f"Índice {selected_index} no válido")
-        except Exception as e:
-            print(f"ERROR al crear vista {selected_index}: {e}")
-            traceback.print_exc()
-            current_view = ft.Column(
-                [
-                    ft.Text(f"Error al cargar herramienta {selected_index}", color=ft.Colors.RED, size=16),
-                    ft.Text(f"{e}", selectable=True)
-                ],
-                expand=True,
-                horizontal_alignment=ft.CrossAxisAlignment.CENTER
-            )
-
-        main_content_column.controls.clear()
-        if current_view:
-            main_content_column.controls.append(current_view)
-        else:
-            main_content_column.controls.append(ft.Text("Error: Vista no generada."))
-
-        main_content_column.update()
-        page.update()
-        print(f"INFO: Columna de contenido y Página actualizadas para índice {selected_index}.")
-
-    # --- Controles de Navegación Responsivos ---
-
-    # 1. Menú para pantallas pequeñas (CORREGIDO: ft.Icons)
-    app_bar_menu_button = ft.PopupMenuButton(
-        icon=ft.Icons.MENU,
-        items=[
-            ft.PopupMenuItem(text="AF", on_click=lambda _: change_view(0)),
-            ft.PopupMenuItem(text="AP", on_click=lambda _: change_view(1)),
-            ft.PopupMenuItem(text="MT", on_click=lambda _: change_view(2)),
-        ]
-    )
-
-    # 2. Barra lateral (Rail) para pantallas grandes (CORREGIDO: ft.Icons)
-    navigation_rail = ft.NavigationRail(
-        selected_index=0,
-        label_type=ft.NavigationRailLabelType.ALL,
-        min_width=100,
-        min_extended_width=200,
-        group_alignment=-0.9,
-        destinations=[
-            ft.NavigationRailDestination(icon=ft.Icons.HUB_OUTLINED, label="AF", selected_icon=ft.Icons.HUB),
-            ft.NavigationRailDestination(icon=ft.Icons.LAYERS_OUTLINED, label="AP", selected_icon=ft.Icons.LAYERS),
-            ft.NavigationRailDestination(icon=ft.Icons.MEMORY_OUTLINED, label="MT", selected_icon=ft.Icons.MEMORY),
-        ],
-        on_change=change_view,
-        # ELIMINADO: expand=True - esto causaba el problema
-    )
-
-    # --- Función para manejar el cambio de tamaño de la ventana ---
-    def handle_resize(e):
-        BREAKPOINT = 700  # Píxeles para cambiar de vista móvil a escritorio
-
-        # CORRECCIÓN PRINCIPAL: Usar page.width en lugar de page.window_width
-        if page.width <= BREAKPOINT:
-            # VISTA PEQUEÑA (MÓVIL)
-            navigation_rail.visible = False
-            page.appbar.leading = app_bar_menu_button
-            page.appbar.title = ft.Text("Teoría de la Computación")
-            page.appbar.visible = True
-        else:
-            # VISTA GRANDE (ESCRITORIO)
-            navigation_rail.visible = True
-            page.appbar.visible = False  # Ocultamos el AppBar
-
-        page.update()
-
-    # Asignar la función al evento de redimensionar
-    page.on_resize = handle_resize
-
-    # --- Definir el Layout Principal de la Página ---
-    page.appbar = ft.AppBar(
-        leading=app_bar_menu_button,  # El botón de menú
-        title=ft.Text("Teoría de la Computación"),
-        visible=False  # Inicialmente oculto, handle_resize decidirá
-    )
-
-    # CORRECCIÓN PRINCIPAL: Envolver el Row principal en un Container con altura fija
-    main_row = ft.Row(
-        [
-            # CORRECCIÓN: Envolver el NavigationRail en un Container con altura fija
-            ft.Container(
-                content=navigation_rail,
-                height=page.height - 60 if page.height else 600,  # Altura fija menos espacio para appbar
-                width=120,  # Ancho fijo para el rail
-            ),
-            ft.VerticalDivider(width=1),
-            # El contenido principal va dentro de un contenedor para darle padding
-            ft.Container(
-                content=main_content_column,
-                padding=ft.padding.all(10),
-                expand=True,
-            )
-        ],
-        expand=True,
-        spacing=0,
-    )
-
-    page.add(main_row)
-
-    # --- Cargar la Vista Inicial ---
-    print("INFO: Realizando carga inicial...")
-    # Llamar a handle_resize para establecer el layout correcto al inicio
-    handle_resize(None)
-    # Cargar la herramienta del índice 0
-    change_view(0)
-    print("INFO: Carga inicial completada.")
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
-# --- Punto de Entrada ---
+def _kleene(states, transitions, initial, accepting, alphabet):
+    """Kleene closure: add ε-transitions from accept states back to initial."""
+    new_start = "KL_START"
+    new_states = list(states) + [new_start]
+    new_trans = {s: dict(t) for s, t in transitions.items()}
+    # New start → old initial, also accepting
+    new_trans[new_start] = dict(transitions.get(initial, {}))
+    new_accepting = set(accepting) | {new_start}
+    return automaton_to_json(new_states, new_trans, new_start, new_accepting, alphabet)
+
+
+def _positive(states, transitions, initial, accepting, alphabet):
+    """Positive closure: same as Kleene but initial is not accepting."""
+    new_start = "PL_START"
+    new_states = list(states) + [new_start]
+    new_trans = {s: dict(t) for s, t in transitions.items()}
+    new_trans[new_start] = dict(transitions.get(initial, {}))
+    return automaton_to_json(new_states, new_trans, new_start, set(accepting), alphabet)
+
+
+def _reverse(states, transitions, initial, accepting, alphabet):
+    """Reverse: swap initial/accepting, reverse transitions."""
+    new_start = "REV_START"
+    new_states = list(states) + [new_start]
+    rev_trans: Dict[str, Dict[str, str]] = {s: {} for s in new_states}
+    for s, trans in transitions.items():
+        for sym, dest in trans.items():
+            rev_trans[dest][sym] = s
+    # New start ε-connects to all old accept states
+    for s in accepting:
+        rev_trans[new_start][f"ε_{s}"] = s  # pseudo ε
+    new_accepting = {initial}
+    return automaton_to_json(new_states, rev_trans, new_start, new_accepting, alphabet)
+
+
+def _complement(states, transitions, initial, accepting, alphabet):
+    """Complement: swap accepting / non-accepting."""
+    new_accepting = set(states) - accepting
+    return automaton_to_json(list(states), transitions, initial, new_accepting, alphabet)
+
+
+def _power(states, transitions, initial, accepting, alphabet, n: int):
+    """L^n: concatenate automaton n times."""
+    if n <= 0:
+        # Only ε
+        s = "EPS"
+        return automaton_to_json([s], {s: {}}, s, {s}, alphabet)
+    if n == 1:
+        return automaton_to_json(list(states), transitions, initial, accepting, alphabet)
+
+    # Build product for concatenation
+    # Simple approach: chain copies
+    all_states = []
+    all_trans = {}
+    all_accepting = set()
+    prev_accepting = None
+
+    for k in range(n):
+        prefix = f"P{k}_"
+        k_states = [prefix + s for s in states]
+        all_states += k_states
+        for s, trans in transitions.items():
+            all_trans[prefix + s] = {sym: prefix + dest for sym, dest in trans.items()}
+        k_accepting = {prefix + s for s in accepting}
+
+        if k == n - 1:
+            all_accepting = k_accepting
+
+        # Connect previous accepting to this initial
+        if prev_accepting:
+            for pa in prev_accepting:
+                for sym, dest in transitions.get(initial, {}).items():
+                    all_trans[pa][sym] = prefix + dest
+
+        prev_accepting = k_accepting
+
+    k_initial = "P0_" + initial
+    return automaton_to_json(all_states, all_trans, k_initial, all_accepting, alphabet)
+
+
+# ═══════════════════════════════════════════════════════════
+# TURING MACHINE ENDPOINTS
+# ═══════════════════════════════════════════════════════════
+
+class TuringDefinition(BaseModel):
+    states: str          # comma-separated
+    initial: str
+    acceptStates: str    # comma-separated
+    transitions: str     # multiline format
+
+
+class TuringSimulateRequest(BaseModel):
+    definition: TuringDefinition
+    tape: str
+    headPos: int = 0
+    maxSteps: int = 500
+
+
+@app.post("/api/turing/graph")
+def turing_graph(req: TuringDefinition):
+    """Parse TM definition and return graph JSON for Flutter canvas."""
+    states = [s.strip() for s in req.states.split(',') if s.strip()]
+    accept_states = [s.strip() for s in req.acceptStates.split(',') if s.strip()]
+    transitions = parse_transitions(req.transitions)
+    graph = build_graph_json(states, transitions, req.initial.strip(), accept_states)
+    return graph
+
+
+@app.post("/api/turing/simulate")
+def turing_simulate(req: TuringSimulateRequest):
+    """Simulate Turing Machine and return all steps."""
+    d = req.definition
+    states = [s.strip() for s in d.states.split(',') if s.strip()]
+    accept_states = [s.strip() for s in d.acceptStates.split(',') if s.strip()]
+    transitions = parse_transitions(d.transitions)
+
+    try:
+        result = simulate_turing(
+            states=states,
+            transitions=transitions,
+            initial_state=d.initial.strip(),
+            accept_states=accept_states,
+            tape_input=req.tape,
+            head_pos=req.headPos,
+            max_steps=req.maxSteps,
+        )
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ═══════════════════════════════════════════════════════════
+# HEALTH CHECK
+# ═══════════════════════════════════════════════════════════
+
+@app.get("/health")
+def health():
+    return {"status": "ok", "version": "1.0.0"}
+
+
 if __name__ == "__main__":
-    ft.app(target=main)
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)

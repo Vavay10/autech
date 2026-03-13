@@ -1,8 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:autechvapis/modules/login_screen.dart';
+import 'package:autechvapis/general/login_screen.dart';
 import 'package:autechvapis/layout/main_layout.dart';
-import 'package:autechvapis/theme.dart';
 
 void main() {
   testWidgets('Flujo de Autenticación: Login a MainLayout', (WidgetTester tester) async {
